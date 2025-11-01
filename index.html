@@ -432,12 +432,19 @@
             background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
             color: white;
             transform: scale(1.08);
+            animation: pulse-select 1s ease infinite;
+        }
+
+        @keyframes pulse-select {
+            0%, 100% { box-shadow: 0 4px 10px rgba(245, 87, 108, 0.4); }
+            50% { box-shadow: 0 4px 20px rgba(245, 87, 108, 0.8); }
         }
 
         .tap-item.matched {
             background: linear-gradient(135deg, #4caf50 0%, #81c784 100%);
             color: white;
             cursor: default;
+            opacity: 0.6;
         }
 
         .tap-zone {
@@ -449,6 +456,7 @@
             min-height: 70px;
             transition: all 0.3s;
             cursor: pointer;
+            position: relative;
         }
 
         .tap-zone:hover {
@@ -465,20 +473,65 @@
 
         .tap-zone.selected {
             border-color: #f5576c;
-            background: #fce4ec;
+            background: linear-gradient(135deg, #fce4ec 0%, #fff9c4 100%);
             transform: scale(1.05);
+            border-style: solid;
+            animation: pulse-select 1s ease infinite;
         }
 
-        .tap-zone.matched {
-            background: #c8e6c9;
-            border-color: #4caf50;
+        .tap-zone.has-match {
+            background: linear-gradient(135deg, #e1f5fe 0%, #fff9c4 100%);
+            border-color: #667eea;
             border-style: solid;
         }
 
+        .tap-zone.matched {
+            background: linear-gradient(135deg, #c8e6c9 0%, #a5d6a7 100%);
+            border-color: #4caf50;
+            border-style: solid;
+            animation: success-pulse 0.6s;
+        }
+
+        .tap-zone.matched::after {
+            content: "✓ CORRECT!";
+            position: absolute;
+            top: 5px;
+            right: 10px;
+            font-size: 1.2em;
+            color: #2e7d32;
+            font-weight: bold;
+            background: white;
+            padding: 3px 8px;
+            border-radius: 5px;
+        }
+
         .tap-zone.incorrect {
-            background: #ffcdd2;
+            background: linear-gradient(135deg, #ffcdd2 0%, #ef9a9a 100%);
             border-color: #f44336;
+            border-style: solid;
             animation: error-shake 0.5s;
+        }
+
+        .tap-zone.incorrect::after {
+            content: "✗ WRONG";
+            position: absolute;
+            top: 5px;
+            right: 10px;
+            font-size: 1.2em;
+            color: #c62828;
+            font-weight: bold;
+            background: white;
+            padding: 3px 8px;
+            border-radius: 5px;
+        }
+
+        .tap-zone .matched-item-display {
+            background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%);
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 8px;
+            font-weight: bold;
+            border: 2px solid #667eea;
         }
 
         .tap-match-hint {
@@ -1950,14 +2003,17 @@
             // If this item is already matched, unmatch it
             if (itemElement.classList.contains('matched')) {
                 const itemName = itemElement.dataset.itemName;
+                const matchedZoneName = state.matches[itemName];
                 delete state.matches[itemName];
                 itemElement.classList.remove('matched');
                 
                 // Find and unmatch the corresponding zone
                 const zones = document.querySelectorAll(`.tap-zone[data-question-index="${questionIndex}"]`);
                 zones.forEach(zone => {
-                    if (zone.dataset.zoneName === state.matches[itemName]) {
-                        zone.classList.remove('matched');
+                    if (zone.dataset.zoneName === matchedZoneName) {
+                        zone.classList.remove('has-match');
+                        const display = zone.querySelector('.matched-item-display');
+                        if (display) display.remove();
                     }
                 });
                 
@@ -1998,7 +2054,7 @@
             const state = tapMatchState[questionIndex];
             
             // If this zone is already matched, unmatch it
-            if (zoneElement.classList.contains('matched')) {
+            if (zoneElement.classList.contains('has-match')) {
                 const zoneName = zoneElement.dataset.zoneName;
                 
                 // Find the matched item and unmatch it
@@ -2010,7 +2066,10 @@
                     }
                 });
                 
-                zoneElement.classList.remove('matched');
+                zoneElement.classList.remove('has-match');
+                const display = zoneElement.querySelector('.matched-item-display');
+                if (display) display.remove();
+                
                 updateProgress();
                 return;
             }
@@ -2048,7 +2107,18 @@
             state.selectedItem.classList.remove('selected');
             state.selectedItem.classList.add('matched');
             state.selectedZone.classList.remove('selected');
-            state.selectedZone.classList.add('matched');
+            state.selectedZone.classList.add('has-match');
+            
+            // Display the matched item in the zone
+            const existingDisplay = state.selectedZone.querySelector('.matched-item-display');
+            if (existingDisplay) {
+                existingDisplay.remove();
+            }
+            
+            const matchDisplay = document.createElement('div');
+            matchDisplay.className = 'matched-item-display';
+            matchDisplay.textContent = `✓ ${itemName}`;
+            state.selectedZone.appendChild(matchDisplay);
             
             // Show celebration
             showCelebration('⭐');
@@ -2141,39 +2211,50 @@
                     if (!state || !state.matches) {
                         allCorrect = false;
                     } else {
-                        // Check if all items are correctly matched
-                        q.pairs.forEach(pair => {
-                            if (state.matches[pair.item] !== pair.zone) {
-                                allCorrect = false;
-                            }
-                        });
+                        // Check if all pairs are correctly matched
+                        if (Object.keys(state.matches).length !== q.pairs.length) {
+                            allCorrect = false;
+                        } else {
+                            q.pairs.forEach(pair => {
+                                if (state.matches[pair.item] !== pair.zone) {
+                                    allCorrect = false;
+                                }
+                            });
+                        }
                     }
                     
-                    // Visual feedback
+                    // Visual feedback for zones
                     const zones = questionCard.querySelectorAll('.tap-zone');
                     const items = questionCard.querySelectorAll('.tap-item');
+                    
+                    // Create a map of correct answers
+                    const correctMap = {};
+                    q.pairs.forEach(pair => {
+                        correctMap[pair.item] = pair.zone;
+                    });
                     
                     zones.forEach(zone => {
                         zone.style.pointerEvents = 'none';
                         const zoneName = zone.dataset.zoneName;
+                        zone.classList.remove('has-match');
                         
-                        // Find if any item is matched to this zone
-                        let matchedCorrectly = false;
+                        // Find what's matched to this zone
+                        let matchedItem = null;
                         if (state && state.matches) {
                             for (const [itemName, matchedZone] of Object.entries(state.matches)) {
                                 if (matchedZone === zoneName) {
-                                    // Check if this is the correct match
-                                    const correctPair = q.pairs.find(p => p.item === itemName);
-                                    if (correctPair && correctPair.zone === zoneName) {
-                                        matchedCorrectly = true;
-                                        zone.classList.remove('matched');
-                                        zone.classList.add('matched');
-                                        zone.style.borderStyle = 'solid';
-                                    } else {
-                                        zone.classList.remove('matched');
-                                        zone.classList.add('incorrect');
-                                    }
+                                    matchedItem = itemName;
+                                    break;
                                 }
+                            }
+                        }
+                        
+                        if (matchedItem) {
+                            // Check if this match is correct
+                            if (correctMap[matchedItem] === zoneName) {
+                                zone.classList.add('matched');
+                            } else {
+                                zone.classList.add('incorrect');
                             }
                         }
                     });
@@ -2182,7 +2263,7 @@
                         item.style.pointerEvents = 'none';
                     });
                     
-                    if (allCorrect && q.pairs.length === Object.keys(state?.matches || {}).length) {
+                    if (allCorrect) {
                         score++;
                     }
                 }
